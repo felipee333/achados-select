@@ -1,0 +1,68 @@
+
+name: Publicar produto ACHADOS Select
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  publicar:
+    if: contains(github.event.issue.labels.*.name, 'publicar-produto')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar repositorio
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Atualizar catalogo
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          body = os.environ["ISSUE_BODY"]
+          produto = json.loads(body)
+
+          obrigatorios = ["nome", "categoria", "link"]
+          if not isinstance(produto, dict) or not all(
+              isinstance(produto.get(k), str) and produto[k].strip()
+              for k in obrigatorios
+          ):
+              raise ValueError("Produto invalido")
+
+          if not produto["link"].startswith("https://"):
+              raise ValueError("Link deve usar HTTPS")
+
+          caminho = Path("catalogo.json")
+          dados = json.loads(caminho.read_text(encoding="utf-8"))
+
+          if isinstance(dados, list):
+              dados.append(produto)
+          elif isinstance(dados, dict) and isinstance(dados.get("produtos"), list):
+              dados["produtos"].append(produto)
+          else:
+              raise ValueError("Formato de catalogo desconhecido")
+
+          caminho.write_text(
+              json.dumps(dados, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Publicar alteracao
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalogo.json
+          git diff --cached --quiet || (
+            git commit -m "Adicionar produto ao catalogo" &&
+            git push
+          )
