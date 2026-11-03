@@ -1,11 +1,8 @@
-
 name: Publicar produto ACHADOS Select
 
 on:
   issues:
-    types:
-      - opened
-      - labeled
+    types: [opened, labeled]
 
 permissions:
   contents: write
@@ -16,7 +13,6 @@ jobs:
       github.event.issue.user.login == 'felipee333' &&
       contains(github.event.issue.labels.*.name, 'publicar-produto')
     runs-on: ubuntu-latest
-
     steps:
       - name: Baixar repositorio
         uses: actions/checkout@v4
@@ -28,57 +24,46 @@ jobs:
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          python3 - <<'PY'
+          python3 - <<'PYCODE'
           import json
           import os
           from pathlib import Path
           from urllib.parse import urlparse
 
-          produto = json.loads(os.environ["ISSUE_BODY"])
-
+          produto = json.loads(os.environ['ISSUE_BODY'])
           if not isinstance(produto, dict):
-              raise ValueError("Produto invalido")
-
-          obrigatorios = ["nome", "categoria", "link"]
-
-          for campo in obrigatorios:
-              valor = produto.get(campo)
-              if not isinstance(valor, str) or not valor.strip():
-                  raise ValueError("Campo invalido: " + campo)
-
-          url = urlparse(produto["link"])
-          if url.scheme != "https" or not url.hostname:
-              raise ValueError("Link HTTPS invalido")
-
-          caminho = Path("catalogo.json")
-          dados = json.loads(caminho.read_text(encoding="utf-8"))
-
-          if isinstance(dados, list):
-              produtos = dados
-          elif isinstance(dados, dict) and isinstance(
-              dados.get("produtos"), list
-          ):
-              produtos = dados["produtos"]
+              raise ValueError('Produto precisa ser um objeto JSON')
+          for campo in ('id', 'name', 'category', 'url'):
+              if not isinstance(produto.get(campo), str) or not produto[campo].strip():
+                  raise ValueError('Campo obrigatorio invalido: ' + campo)
+          for campo, limite in (('id', 100), ('name', 120), ('category', 60), ('description', 350), ('url', 2000), ('image', 2000)):
+              if not isinstance(produto.get(campo, ''), str) or len(produto.get(campo, '')) > limite:
+                  raise ValueError('Campo invalido: ' + campo)
+          def https_valido(valor):
+              u = urlparse(valor)
+              return u.scheme == 'https' and bool(u.hostname) and not u.username and not u.password
+          if not https_valido(produto['url']):
+              raise ValueError('URL de afiliado invalida')
+          if produto.get('image') and not https_valido(produto['image']):
+              raise ValueError('URL de imagem invalida')
+          produto = {k: produto.get(k, '') for k in ('id', 'name', 'category', 'description', 'url', 'image')}
+          arquivo = Path('catalogo.json')
+          dados = json.loads(arquivo.read_text(encoding='utf-8'))
+          if not isinstance(dados, list):
+              raise ValueError('catalogo.json precisa ser uma lista')
+          if any(p.get('id') == produto['id'] for p in dados if isinstance(p, dict)):
+              print('Produto ja cadastrado; nenhuma alteracao')
           else:
-              raise ValueError("Formato do catalogo desconhecido")
-
-          produtos.append(produto)
-
-          caminho.write_text(
-              json.dumps(dados, ensure_ascii=False, indent=2) + "\n",
-              encoding="utf-8"
-          )
-
-          print("Produto adicionado ao catalogo")
-          PY
+              dados.append(produto)
+              arquivo.write_text(json.dumps(dados, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PYCODE
 
       - name: Publicar no GitHub
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add catalogo.json
-
           if ! git diff --cached --quiet; then
-            git commit -m "Adicionar produto ao catalogo"
+            git commit -m 'Adicionar produto ao catalogo'
             git push origin HEAD:main
           fi
